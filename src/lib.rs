@@ -48,11 +48,12 @@ mod misc;
 mod xy;
 
 pub use misc::*;
-use models::*; 
 pub use xy::*;
 
-
+#[cfg(feature = "yolo")]
 pub mod models {
-    #[cfg(feature = "yolo")]
     pub mod yolo;
 }
+
+#[cfg(feature = "yolo")]
+pub use models::yolo;
