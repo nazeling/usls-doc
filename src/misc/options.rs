@@ -2,6 +2,7 @@ use aksr::Builder;
 use anyhow::Result;
 use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer, TruncationParams};
 use std::path::Path;
+#[cfg(feature = "yolo")]
 use crate::models::yolo::YOLOPredsFormat;
 use crate::{ DType, Device, Engine, Hub, Iiix, Kind, LogitsSampler, MinOptMax, Processor, ResizeMode, Scale,
     Task, Version,
@@ -73,7 +74,8 @@ pub struct Options {
     pub iou_3: Option<f32>,
     pub apply_nms: Option<bool>,
     pub find_contours: bool,
-    pub yolo_preds_format: Option<YOLOPredsFormat>,
+    #[cfg(feature = "yolo")]
+	pub yolo_preds_format: Option<YOLOPredsFormat>,
     pub classes_excluded: Vec<usize>,
     pub classes_retained: Vec<usize>,
     pub min_width: Option<f32>,
@@ -155,6 +157,7 @@ impl Default for Options {
             iou_3: None,
             apply_nms: None,
             find_contours: false,
+            #[cfg(feature = "yolo")]
             yolo_preds_format: None,
             classes_excluded: vec![],
             classes_retained: vec![],
