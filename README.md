@@ -88,8 +88,6 @@ By default, **none of the following features are enabled**. You can enable them 
   cargo run -r --example yolo
   ```
 
-All examples are located in the [examples](./examples/) directory.
-
 ## 🥂 Integrate Into Your Own Project
 
 Add `usls` as a dependency to your project's `Cargo.toml`
@@ -102,7 +100,7 @@ Or use a specific commit:
 
 ```Toml
 [dependencies]
-usls = { git = "https://github.com/jamjamjon/usls", rev = "commit-sha" }
+usls = { git = "https://github.com/nazeling/usls-doc", rev = "commit-sha" }
 ```
 
 ## 🥳 If you find this helpful, please give it a star ⭐
