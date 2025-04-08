@@ -1,16 +1,13 @@
-//! Options for everthing
-
 use aksr::Builder;
 use anyhow::Result;
 use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer, TruncationParams};
-
+use std::path::Path;
 use crate::{
-    models::{SamKind, YOLOPredsFormat},
+    yolo::YOLOPredsFormat,
     DType, Device, Engine, Hub, Iiix, Kind, LogitsSampler, MinOptMax, Processor, ResizeMode, Scale,
     Task, Version,
 };
 
-/// Options for building models and inference
 #[derive(Builder, Debug, Clone)]
 pub struct Options {
     // Model configs
@@ -27,7 +24,7 @@ pub struct Options {
     pub model_num_dry_run: usize,
     pub trt_fp16: bool,
     pub profile: bool,
-
+    
     // Processor configs
     #[args(setter = false)]
     pub image_width: u32,
@@ -68,20 +65,9 @@ pub struct Options {
     pub text_confs_2: Vec<f32>,
     pub text_confs_3: Vec<f32>,
 
-    // Files
-    pub file: Option<String>,
-    pub file_2: Option<String>,
-    pub file_3: Option<String>,
-
-    // For classification
-    pub apply_softmax: Option<bool>,
-
-    // For detection
-    #[args(alias = "nc")]
+    // Detection
     pub num_classes: Option<usize>,
-    #[args(alias = "nk")]
     pub num_keypoints: Option<usize>,
-    #[args(alias = "nm")]
     pub num_masks: Option<usize>,
     pub iou: Option<f32>,
     pub iou_2: Option<f32>,
@@ -94,90 +80,87 @@ pub struct Options {
     pub min_width: Option<f32>,
     pub min_height: Option<f32>,
 
-    // Language models related
+    // Language/OCR configs
     pub model_max_length: Option<u64>,
     pub tokenizer_file: Option<String>,
     pub config_file: Option<String>,
     pub special_tokens_map_file: Option<String>,
     pub tokenizer_config_file: Option<String>,
     pub generation_config_file: Option<String>,
-    pub vocab_file: Option<String>, // vocab.json file
-    pub vocab_txt: Option<String>,  // vacab.txt file, not kv pairs
+    pub vocab_file: Option<String>,
+    pub vocab_txt: Option<String>,
     pub temperature: f32,
     pub topp: f32,
 
-    // For DB
+    // DB-specific
     pub unclip_ratio: Option<f32>,
     pub binary_thresh: Option<f32>,
 
-    // For SAM
-    pub sam_kind: Option<SamKind>,
+    // SAM-specific
     pub low_res_mask: Option<bool>,
 }
 
 impl Default for Options {
     fn default() -> Self {
         Self {
-            model_file: Default::default(),
-            model_name: Default::default(),
-            model_version: Default::default(),
-            model_task: Default::default(),
-            model_scale: Default::default(),
-            model_kind: Default::default(),
+            model_file: String::new(),
+            model_name: "",
             model_device: Device::Cpu(0),
             model_dtype: DType::Auto,
-            model_spec: Default::default(),
-            model_iiixs: Default::default(),
+            model_version: None,
+            model_task: None,
+            model_scale: None,
+            model_kind: None,
+            model_iiixs: Vec::new(),
+            model_spec: String::new(),
             model_num_dry_run: 3,
             trt_fp16: true,
             profile: false,
+            image_width: 640,
+            image_height: 640,
+            resize_mode: ResizeMode::FitExact,
+            resize_filter: "Bilinear",
+            padding_value: 114,
+            letterbox_center: false,
             normalize: true,
             image_mean: vec![],
             image_std: vec![],
-            image_height: 640,
-            image_width: 640,
-            padding_value: 114,
-            resize_mode: ResizeMode::FitExact,
-            resize_filter: "Bilinear",
-            letterbox_center: false,
             nchw: true,
             unsigned: false,
             class_names: None,
             class_names_2: None,
             class_names_3: None,
-            category_names: None,
-            category_names_2: None,
-            category_names_3: None,
             keypoint_names: None,
             keypoint_names_2: None,
             keypoint_names_3: None,
             text_names: None,
             text_names_2: None,
             text_names_3: None,
-            file: None,
-            file_2: None,
-            file_3: None,
-            class_confs: vec![0.3f32],
-            class_confs_2: vec![0.3f32],
-            class_confs_3: vec![0.3f32],
-            keypoint_confs: vec![0.3f32],
-            keypoint_confs_2: vec![0.5f32],
-            keypoint_confs_3: vec![0.5f32],
-            text_confs: vec![0.4f32],
-            text_confs_2: vec![0.4f32],
-            text_confs_3: vec![0.4f32],
-            apply_softmax: Some(false),
+            category_names: None,
+            category_names_2: None,
+            category_names_3: None,
+            class_confs: vec![0.3],
+            class_confs_2: vec![0.3],
+            class_confs_3: vec![0.3],
+            keypoint_confs: vec![0.3],
+            keypoint_confs_2: vec![0.5],
+            keypoint_confs_3: vec![0.5],
+            text_confs: vec![0.4],
+            text_confs_2: vec![0.4],
+            text_confs_3: vec![0.4],
             num_classes: None,
             num_keypoints: None,
             num_masks: None,
             iou: None,
             iou_2: None,
             iou_3: None,
+            apply_nms: None,
             find_contours: false,
             yolo_preds_format: None,
             classes_excluded: vec![],
             classes_retained: vec![],
-            apply_nms: None,
+            min_width: None,
+            min_height: None,
             model_max_length: None,
             tokenizer_file: None,
             config_file: None,
@@ -186,21 +169,33 @@ impl Default for Options {
             generation_config_file: None,
             vocab_file: None,
             vocab_txt: None,
-            min_width: None,
-            min_height: None,
+            temperature: 1.0,
+            topp: 0.0,
             unclip_ratio: Some(1.5),
             binary_thresh: Some(0.2),
-            sam_kind: None,
             low_res_mask: None,
-            temperature: 1.,
-            topp: 0.,
         }
     }
 }
 
 impl Options {
     pub fn new() -> Self {
-        Default::default()
+        Self::default()
+    }
+
+    pub fn with_model_path(mut self, path: &str) -> Result<Self> {
+        self.model_file = path.to_string();
+        Ok(self)
+    }
+
+    pub fn with_generation_config<P: AsRef<Path>>(mut self, path: P) -> Result<Self> {
+        self.generation_config_file = Some(path.as_ref().to_string_lossy().into_owned());
+        Ok(self)
+    }
+
+    pub fn with_special_tokens_map<P: AsRef<Path>>(mut self, path: P) -> Result<Self> {
+        self.special_tokens_map_file = Some(path.as_ref().to_string_lossy().into_owned());
+        Ok(self)
     }
 
     pub fn to_engine(&self) -> Result<Engine> {
@@ -217,67 +212,64 @@ impl Options {
     }
 
     pub fn to_processor(&self) -> Result<Processor> {
-        let logits_sampler = LogitsSampler::new()
-            .with_temperature(self.temperature)
-            .with_topp(self.topp);
+    let logits_sampler = LogitsSampler::new()
+        .with_temperature(self.temperature)
+        .with_topp(self.topp);
 
-        // try to build tokenizer
-        let tokenizer = match self.model_kind {
-            Some(Kind::Language) | Some(Kind::VisionLanguage) => Some(self.try_build_tokenizer()?),
-            _ => None,
-        };
+    let tokenizer = match self.model_kind {
+        Some(Kind::Language) | Some(Kind::VisionLanguage) => self.try_build_tokenizer()?,
+        _ => return Err(anyhow::anyhow!("Tokenizer required for language models")),
+    };
 
-        // try to build vocab from `vocab.txt`
-        let vocab: Vec<String> = match &self.vocab_txt {
-            Some(x) => {
-                let file = if !std::path::PathBuf::from(&x).exists() {
-                    Hub::default().try_fetch(&format!("{}/{}", self.model_name, x))?
-                } else {
-                    x.to_string()
-                };
-                std::fs::read_to_string(file)?
-                    .lines()
-                    .map(|line| line.to_string())
-                    .collect()
-            }
-            None => vec![],
-        };
+    let vocab: Vec<String> = match &self.vocab_txt {
+        Some(x) => {
+            let file = if !std::path::PathBuf::from(&x).exists() {
+                Hub::default().try_fetch(&format!("{}/{}", self.model_name, x))?
+            } else {
+                x.to_string()
+            };
+            std::fs::read_to_string(file)?
+                .lines()
+                .map(|line| line.to_string())
+                .collect()
+        }
+        None => vec![],
+    };
 
-        Ok(Processor {
-            image_width: self.image_width,
-            image_height: self.image_height,
-            resize_mode: self.resize_mode.clone(),
-            resize_filter: self.resize_filter,
-            padding_value: self.padding_value,
-            do_normalize: self.normalize,
-            image_mean: self.image_mean.clone(),
-            image_std: self.image_std.clone(),
-            nchw: self.nchw,
-            unsigned: self.unsigned,
-            tokenizer,
-            vocab,
-            logits_sampler: Some(logits_sampler),
-            ..Default::default()
-        })
-    }
+    // Convert Vec<String> to Vec<&str>
+    let vocab_refs: Vec<&str> = vocab.iter().map(|s| s.as_str()).collect();
+
+    Ok(Processor::default()
+        .with_image_width(self.image_width)
+        .with_image_height(self.image_height)
+        .with_image0s_size(&[]) // Empty slice
+        .with_scale_factors_hw(&[]) // Empty slice
+        .with_resize_mode(self.resize_mode.clone())
+        .with_resize_filter(self.resize_filter)
+        .with_padding_value(self.padding_value)
+        .with_do_normalize(self.normalize)
+        .with_image_mean(&self.image_mean) // Borrow the Vec
+        .with_image_std(&self.image_std) // Borrow the Vec
+        .with_nchw(self.nchw)
+        .with_tokenizer(tokenizer) // Unwrapped tokenizer
+        .with_vocab(&vocab_refs) // Convert to slice of &str
+        .with_unsigned(self.unsigned)
+        .with_logits_sampler(logits_sampler) // Unwrapped sampler
+        .with_options(self.clone()))
+}
 
     pub fn commit(mut self) -> Result<Self> {
-        // Identify the local model or fetch the remote model
-
         if std::path::PathBuf::from(&self.model_file).exists() {
-            // Local
             self.model_spec = format!(
                 "{}/{}",
                 self.model_name,
                 crate::try_fetch_stem(&self.model_file)?
             );
         } else {
-            // Remote
             if self.model_file.is_empty() && self.model_name.is_empty() {
-                anyhow::bail!("Neither `model_name` nor `model_file` were specified. Faild to fetch model from remote.")
+                anyhow::bail!("Neither `model_name` nor `model_file` were specified. Failed to fetch model from remote.")
             }
 
-            // Load
             match Hub::is_valid_github_release_url(&self.model_file) {
                 Some((owner, repo, tag, _file_name)) => {
                     let stem = crate::try_fetch_stem(&self.model_file)?;
@@ -286,24 +278,21 @@ impl Options {
                     self.model_file = Hub::default().try_fetch(&self.model_file)?;
                 }
                 None => {
-                    // special yolo case
                     if self.model_file.is_empty() && self.model_name == "yolo" {
-                        // [version]-[scale]-[task]
                         let mut y = String::new();
-                        if let Some(x) = self.model_version() {
+                        if let Some(x) = self.model_version {
                             y.push_str(&x.to_string());
                         }
-                        if let Some(x) = self.model_scale() {
+                        if let Some(x) = self.model_scale {
                             y.push_str(&format!("-{}", x));
                         }
-                        if let Some(x) = self.model_task() {
+                        if let Some(ref x) = self.model_task {
                             y.push_str(&format!("-{}", x.yolo_str()));
                         }
                         y.push_str(".onnx");
                         self.model_file = y;
                     }
 
-                    // append dtype to model file
                     match self.model_dtype {
                         d @ (DType::Auto | DType::Fp32) => {
                             if self.model_file.is_empty() {
@@ -314,7 +303,7 @@ impl Options {
                             if self.model_file.is_empty() {
                                 self.model_file = format!("{}.onnx", dtype);
                             } else {
-                                let pos = self.model_file.len() - 5; // .onnx
+                                let pos = self.model_file.len() - 5;
                                 let suffix = self.model_file.split_off(pos);
                                 self.model_file =
                                     format!("{}-{}{}", self.model_file, dtype, suffix);
@@ -369,8 +358,6 @@ impl Options {
 
     pub fn try_build_tokenizer(&self) -> Result<Tokenizer> {
         let mut hub = Hub::default();
-        // config file
-        // TODO: save configs?
         let pad_id = match hub.try_fetch(
             self.tokenizer_config_file
                 .as_ref()
@@ -383,7 +370,6 @@ impl Options {
             Err(_err) => 0u32,
         };
 
-        // tokenizer_config file
         let mut max_length = None;
         let mut pad_token = String::from("[PAD]");
         match hub.try_fetch(
@@ -401,22 +387,17 @@ impl Options {
                     .unwrap_or("[PAD]")
                     .to_string();
             }
-        }
+        };
 
-        // tokenizer file
-        let mut tokenizer: tokenizers::Tokenizer = tokenizers::Tokenizer::from_file(
+        let mut tokenizer: Tokenizer = Tokenizer::from_file(
             hub.try_fetch(
                 self.tokenizer_file
                     .as_ref()
                     .unwrap_or(&format!("{}/tokenizer.json", self.model_name)),
             )?,
         )
-        .map_err(|err| anyhow::anyhow!("Faild to build tokenizer: {err}"))?;
+        .map_err(|err| anyhow::anyhow!("Failed to build tokenizer: {err}"))?;
 
-        // TODO: padding
-        // if `max_length` specified: use `Fixed` strategy
-        // else: use `BatchLongest` strategy
-        // TODO: if sequence_length is dynamic, `BatchLongest` is fine
         let tokenizer = match self.model_max_length {
             Some(n) => {
                 let n = match max_length {
@@ -432,33 +413,33 @@ impl Options {
                     }))
                     .clone()
             }
-            None => match max_length {
-                Some(n) => tokenizer
-                    .with_padding(Some(PaddingParams {
-                        strategy: PaddingStrategy::BatchLongest,
-                        pad_token,
-                        pad_id,
-                        ..Default::default()
-                    }))
-                    .with_truncation(Some(TruncationParams {
-                        max_length: n as _,
-                        ..Default::default()
-                    }))
-                    .map_err(|err| anyhow::anyhow!("Failed to truncate: {}", err))?
-                    .clone(),
-                None => tokenizer
-                    .with_padding(Some(PaddingParams {
-                        strategy: PaddingStrategy::BatchLongest,
-                        pad_token,
-                        pad_id,
-                        ..Default::default()
-                    }))
-                    .clone(),
-            },
+            None => {
+                let modified = match max_length {
+                    Some(n) => tokenizer
+                        .with_padding(Some(PaddingParams {
+                            strategy: PaddingStrategy::BatchLongest,
+                            pad_token,
+                            pad_id,
+                            ..Default::default()
+                        }))
+                        .with_truncation(Some(TruncationParams {
+                            max_length: n as _,
+                            ..Default::default()
+                        }))
+                        .map_err(|err| anyhow::anyhow!("Failed to set truncation: {err}"))?,
+                    None => &mut tokenizer,
+                };
+                modified.clone()
+            }
         };
-
-        // TODO: generation_config.json & special_tokens_map file
-
         Ok(tokenizer.into())
+    }
+
+    pub fn nc(&self) -> Option<usize> {
+        self.num_classes.or_else(|| self.class_names.as_ref().map(|v| v.len()))
+    }
+
+    pub fn nk(&self) -> Option<usize> {
+        self.num_keypoints.or_else(|| self.keypoint_names.as_ref().map(|v| v.len()))
     }
 }

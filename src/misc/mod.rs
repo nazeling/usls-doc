@@ -24,8 +24,6 @@ mod task;
 mod ts;
 mod utils;
 mod version;
-#[cfg(feature = "ffmpeg")]
-mod viewer;
 
 pub use annotator::Annotator;
 pub use color::Color;
@@ -51,9 +49,4 @@ pub use task::Task;
 pub use ts::Ts;
 pub use utils::*;
 pub use version::Version;
-#[cfg(feature = "ffmpeg")]
-pub use viewer::Viewer;
 
-// re-export
-#[cfg(feature = "ffmpeg")]
-pub use minifb::Key;
