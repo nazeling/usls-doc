@@ -40,10 +40,19 @@
 //!
 //! All examples are located in the [examples](https://github.com/jamjamjon/usls/tree/main/examples) directory.
 
+//! **usls-pipeline** is a Rust library integrated with **ONNXRuntime**,
+//! focusing on building a document layout detection and OCR pipeline.
+//! It aims to provide high-level abstractions for model usage.
+
 mod misc;
-pub mod models;
 mod xy;
 
 pub use misc::*;
-pub use models::*;
+use models::*; 
 pub use xy::*;
+
+
+pub mod models {
+    #[cfg(feature = "yolo")]
+    pub mod yolo;
+}
