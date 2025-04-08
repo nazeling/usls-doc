@@ -38,9 +38,6 @@
 
 - **OCR Models**: [FAST](https://github.com/czczup/FAST), [DB(PaddleOCR-Det)](https://arxiv.org/abs/1911.08947), [SVTR(PaddleOCR-Rec)](https://arxiv.org/abs/2205.00159), [SLANet](https://paddlepaddle.github.io/PaddleOCR/latest/algorithm/table_recognition/algorithm_table_slanet.html), [TrOCR](https://huggingface.co/microsoft/trocr-base-printed), [DocLayout-YOLO](https://github.com/opendatalab/DocLayout-YOLO)
 
-<details>
-<summary>👉 More Supported Models</summary>
-
 ## ⛳️ Cargo Features
 
 By default, **none of the following features are enabled**. You can enable them as needed:
