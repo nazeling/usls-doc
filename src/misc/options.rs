@@ -2,6 +2,7 @@ use aksr::Builder;
 use anyhow::Result;
 use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer, TruncationParams};
 use std::path::Path;
+use crate::models::yolo::YOLOPredsFormat;
 use crate::{ DType, Device, Engine, Hub, Iiix, Kind, LogitsSampler, MinOptMax, Processor, ResizeMode, Scale,
     Task, Version,
 };
