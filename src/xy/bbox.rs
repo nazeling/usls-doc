@@ -8,14 +8,14 @@ use crate::Nms;
 /// class ID, confidence score, optional name, and an ID representing the born state.
 #[derive(Builder, Clone, PartialEq, PartialOrd)]
 pub struct Bbox {
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    id: isize,
-    id_born: isize,
-    confidence: f32,
-    name: Option<String>,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub id: isize,
+    pub id_born: isize,
+    pub confidence: f32,
+    pub name: Option<String>,
 }
 
 impl Nms for Bbox {
@@ -33,13 +33,13 @@ impl Nms for Bbox {
 impl Default for Bbox {
     fn default() -> Self {
         Self {
-            x: 0.,
-            y: 0.,
-            w: 0.,
-            h: 0.,
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
             id: -1,
             id_born: -1,
-            confidence: 0.,
+            confidence: 0.0,
             name: None,
         }
     }
@@ -58,56 +58,32 @@ impl std::fmt::Debug for Bbox {
 
 impl From<(f32, f32, f32, f32)> for Bbox {
     /// Creates a `Bbox` from a tuple of `(x, y, w, h)`.
-    ///
-    /// # Arguments
-    ///
-    /// * `(x, y, w, h)` - A tuple representing the bounding box's position and size.
-    ///
-    /// # Returns
-    ///
-    /// A `Bbox` with the specified position and size.
     fn from((x, y, w, h): (f32, f32, f32, f32)) -> Self {
         Self {
             x,
             y,
             w,
             h,
-            ..Default::default()
+            ..Self::default()
         }
     }
 }
 
 impl From<[f32; 4]> for Bbox {
     /// Creates a `Bbox` from an array of `[x, y, w, h]`.
-    ///
-    /// # Arguments
-    ///
-    /// * `[x, y, w, h]` - An array representing the bounding box's position and size.
-    ///
-    /// # Returns
-    ///
-    /// A `Bbox` with the specified position and size.
     fn from([x, y, w, h]: [f32; 4]) -> Self {
         Self {
             x,
             y,
             w,
             h,
-            ..Default::default()
+            ..Self::default()
         }
     }
 }
 
 impl From<(f32, f32, f32, f32, isize, f32)> for Bbox {
     /// Creates a `Bbox` from a tuple of `(x, y, w, h, id, confidence)`.
-    ///
-    /// # Arguments
-    ///
-    /// * `(x, y, w, h, id, confidence)` - A tuple representing the bounding box's position, size, class ID, and confidence score.
-    ///
-    /// # Returns
-    ///
-    /// A `Bbox` with the specified position, size, class ID, and confidence score.
     fn from((x, y, w, h, id, confidence): (f32, f32, f32, f32, isize, f32)) -> Self {
         Self {
             x,
@@ -116,24 +92,36 @@ impl From<(f32, f32, f32, f32, isize, f32)> for Bbox {
             h,
             id,
             confidence,
-            ..Default::default()
+            ..Self::default()
         }
     }
 }
 
 impl Bbox {
+    /// Creates a new `Bbox` with specified parameters.
+    pub fn new(
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        id: isize,
+        id_born: isize,
+        confidence: f32,
+        name: Option<String>,
+    ) -> Self {
+        Self {
+            x,
+            y,
+            w,
+            h,
+            id,
+            id_born,
+            confidence,
+            name,
+        }
+    }
+
     /// Sets the bounding box's coordinates using `(x1, y1, x2, y2)` and calculates width and height.
-    ///
-    /// # Arguments
-    ///
-    /// * `x1` - The x-coordinate of the top-left corner.
-    /// * `y1` - The y-coordinate of the top-left corner.
-    /// * `x2` - The x-coordinate of the bottom-right corner.
-    /// * `y2` - The y-coordinate of the bottom-right corner.
-    ///
-    /// # Returns
-    ///
-    /// A `Bbox` instance with updated coordinates and dimensions.
     pub fn with_xyxy(mut self, x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
         self.x = x1;
         self.y = y1;
@@ -143,17 +131,6 @@ impl Bbox {
     }
 
     /// Sets the bounding box's coordinates and dimensions using `(x, y, w, h)`.
-    ///
-    /// # Arguments
-    ///
-    /// * `x` - The x-coordinate of the top-left corner.
-    /// * `y` - The y-coordinate of the top-left corner.
-    /// * `w` - The width of the bounding box.
-    /// * `h` - The height of the bounding box.
-    ///
-    /// # Returns
-    ///
-    /// A `Bbox` instance with updated coordinates and dimensions.
     pub fn with_xywh(mut self, x: f32, y: f32, w: f32, h: f32) -> Self {
         self.x = x;
         self.y = y;
@@ -177,7 +154,7 @@ impl Bbox {
         self.x
     }
 
-    /// The minimum y-coordinate of the bounding box.
+    /// Returns the minimum y-coordinate of the bounding box.
     pub fn ymin(&self) -> f32 {
         self.y
     }
@@ -187,19 +164,19 @@ impl Bbox {
         self.x + self.w
     }
 
-    /// The maximum x-coordinate of the bounding box.
+    /// Returns the maximum y-coordinate of the bounding box.
     pub fn ymax(&self) -> f32 {
         self.y + self.h
     }
 
     /// Returns the center x-coordinate of the bounding box.
     pub fn cx(&self) -> f32 {
-        self.x + self.w / 2.
+        self.x + self.w / 2.0
     }
 
     /// Returns the center y-coordinate of the bounding box.
     pub fn cy(&self) -> f32 {
-        self.y + self.h / 2.
+        self.y + self.h / 2.0
     }
 
     /// Returns the bounding box coordinates as `(x1, y1, x2, y2)`.
@@ -217,17 +194,11 @@ impl Bbox {
         (self.cx(), self.cy(), self.w, self.h)
     }
 
-    /// A label string representing the bounding box, optionally including name and confidence score.
+    /// Returns a label string representing the bounding box.
     pub fn label(&self, with_name: bool, with_conf: bool, decimal_places: usize) -> String {
         let mut label = String::new();
         if with_name {
-            label.push_str(
-                &self
-                    .name
-                    .as_ref()
-                    .unwrap_or(&self.id.to_string())
-                    .to_string(),
-            );
+            label.push_str(self.name.as_deref().unwrap_or(&self.id.to_string()));
         }
         if with_conf {
             if with_name {
@@ -241,40 +212,35 @@ impl Bbox {
 
     /// Computes the area of the bounding box.
     pub fn area(&self) -> f32 {
-        self.h * self.w
+        self.w * self.h
     }
 
     /// Computes the perimeter of the bounding box.
     pub fn perimeter(&self) -> f32 {
-        (self.h + self.w) * 2.0
+        2.0 * (self.w + self.h)
     }
 
     /// Checks if the bounding box is square (i.e., width equals height).
-    pub fn is_squre(&self) -> bool {
+    pub fn is_square(&self) -> bool {
         self.w == self.h
     }
 
     /// Computes the intersection area between this bounding box and another.
-    pub fn intersect(&self, other: &Bbox) -> f32 {
+    pub fn intersect(&self, other: &Self) -> f32 {
         let l = self.xmin().max(other.xmin());
-        let r = (self.xmin() + self.width()).min(other.xmin() + other.width());
+        let r = self.xmax().min(other.xmax());
         let t = self.ymin().max(other.ymin());
-        let b = (self.ymin() + self.height()).min(other.ymin() + other.height());
-        (r - l).max(0.) * (b - t).max(0.)
+        let b = self.ymax().min(other.ymax());
+        (r - l).max(0.0) * (b - t).max(0.0)
     }
 
     /// Computes the union area between this bounding box and another.
-    pub fn union(&self, other: &Bbox) -> f32 {
+    pub fn union(&self, other: &Self) -> f32 {
         self.area() + other.area() - self.intersect(other)
     }
 
-    // /// Computes the intersection over union (IoU) between this bounding box and another.
-    // pub fn iou(&self, other: &Bbox) -> f32 {
-    //     self.intersect(other) / self.union(other)
-    // }
-
-    /// Checks if this bounding box completely contains another bounding box `other`.
-    pub fn contains(&self, other: &Bbox) -> bool {
+    /// Checks if this bounding box completely contains another.
+    pub fn contains(&self, other: &Self) -> bool {
         self.xmin() <= other.xmin()
             && self.xmax() >= other.xmax()
             && self.ymin() <= other.ymin()
@@ -288,41 +254,35 @@ mod tests_bbox {
 
     #[test]
     fn new() {
-        let bbox1 = Bbox::from((0., 0., 5., 5.));
-        let bbox2 = Bbox::from([0., 0., 5., 5.]);
+        let bbox1 = Bbox::from((0.0, 0.0, 5.0, 5.0));
+        let bbox2 = Bbox::from([0.0, 0.0, 5.0, 5.0]);
         assert_eq!(bbox1, bbox2);
 
-        let bbox1: Bbox = [0., 0., 5., 5.].into();
-        let bbox2: Bbox = (0., 0., 5., 5.).into();
+        let bbox1: Bbox = [0.0, 0.0, 5.0, 5.0].into();
+        let bbox2: Bbox = (0.0, 0.0, 5.0, 5.0).into();
         assert_eq!(bbox1, bbox2);
 
-        let bbox1: Bbox = (1., 1., 5., 5., 99, 0.99).into();
-        let bbox2 = Bbox::default()
-            .with_xyxy(1., 1., 6., 6.)
-            .with_id(99)
-            .with_confidence(0.99);
+        let bbox1: Bbox = (1.0, 1.0, 5.0, 5.0, 99, 0.99).into();
+        let bbox2 = Bbox::new(1.0, 1.0, 5.0, 5.0, 99, -1, 0.99, None);
         assert_eq!(bbox1, bbox2);
 
-        let bbox1: Bbox = (1., 1., 5., 5., 1, 1.).into();
-        let bbox2 = Bbox::default()
-            .with_xywh(1., 1., 5., 5.)
-            .with_id(1)
-            .with_confidence(1.);
+        let bbox1: Bbox = (1.0, 1.0, 5.0, 5.0, 1, 1.0).into();
+        let bbox2 = Bbox::new(1.0, 1.0, 5.0, 5.0, 1, -1, 1.0, None);
         assert_eq!(bbox1, bbox2);
     }
 
     #[test]
     fn funcs() {
-        let bbox1 = Bbox::default().with_xyxy(0., 0., 5., 5.);
-        let bbox2 = Bbox::default().with_xyxy(1., 1., 6., 6.);
-        assert_eq!(bbox1.intersect(&bbox2), 16.);
-        assert_eq!(bbox1.area(), 25.);
-        assert_eq!(bbox2.area(), 25.);
-        assert_eq!(bbox2.perimeter(), 20.);
-        assert!(bbox2.is_squre());
-        assert_eq!(bbox1.union(&bbox2), 34.);
+        let bbox1 = Bbox::new(0.0, 0.0, 5.0, 5.0, -1, -1, 0.0, None);
+        let bbox2 = Bbox::new(1.0, 1.0, 5.0, 5.0, -1, -1, 0.0, None);
+        assert_eq!(bbox1.intersect(&bbox2), 16.0);
+        assert_eq!(bbox1.area(), 25.0);
+        assert_eq!(bbox2.area(), 25.0);
+        assert_eq!(bbox2.perimeter(), 20.0);
+        assert!(bbox2.is_square());
+        assert_eq!(bbox1.union(&bbox2), 34.0);
 
-        let bbox3 = Bbox::default().with_xyxy(2., 2., 5., 5.);
+        let bbox3 = Bbox::new(2.0, 2.0, 3.0, 3.0, -1, -1, 0.0, None);
         assert!(!bbox1.contains(&bbox2));
         assert!(bbox1.contains(&bbox3));
         assert!(bbox2.contains(&bbox3));

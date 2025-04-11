@@ -303,24 +303,36 @@ impl Engine {
 
     #[allow(unused_variables)]
     fn build_session(&mut self, inputs: &OrtTensorAttr) -> Result<Session> {
-        #[allow(unused_mut)]
-        let mut builder = Session::builder()?;
         let compile_help = "Please compile ONNXRuntime with #EP";
         let feature_help = "#EP EP requires the features: `#FEATURE`. \
             \nConsider enabling them by passing, e.g., `--features #FEATURE`";
-
+        let mut builder = Session::builder()?;
         match self.device {
+            Device::Cuda(id) => {
+                #[cfg(not(feature = "cuda"))]
+                anyhow::bail!("CUDA feature not enabled in ort crate");
+                #[cfg(feature = "cuda")]
+                {
+                    println!("Using CUDA execution provider"); // Debug
+                    let ep = ort::execution_providers::CUDAExecutionProvider::default()
+                        .with_device_id(id as i32);
+                    if ep.is_available()? {
+                        ep.register(&mut builder)?;
+                    } else {
+                        anyhow::bail!("CUDA not available");
+                    }
+                }
+            }
             Device::TensorRT(id) => {
+                println!("Using TensorRT execution provider");
                 #[cfg(not(feature = "trt"))]
                 {
                     anyhow::bail!(feature_help
                         .replace("#EP", "TensorRT")
                         .replace("#FEATURE", "trt"));
                 }
-
                 #[cfg(feature = "trt")]
                 {
-                    // generate shapes
                     let mut spec_min = String::new();
                     let mut spec_opt = String::new();
                     let mut spec_max = String::new();
@@ -348,7 +360,6 @@ impl Engine {
                         spec_opt += &s_opt;
                         spec_max += &s_max;
                     }
-
                     let p = crate::Dir::Cache.path_with_subs(&["trt-cache"])?;
                     let ep = ort::execution_providers::TensorRTExecutionProvider::default()
                         .with_device_id(id as i32)
@@ -359,60 +370,27 @@ impl Engine {
                         .with_profile_min_shapes(spec_min)
                         .with_profile_opt_shapes(spec_opt)
                         .with_profile_max_shapes(spec_max);
-
                     match ep.is_available() {
                         Ok(true) => {
                             info!(
                                 "Initial model serialization with TensorRT may require a wait..."
                             );
-                            ep.register(&mut builder).map_err(|err| {
-                                anyhow::anyhow!("Failed to register TensorRT: {}", err)
-                            })?;
+                            ep.register(&mut builder)?;
                         }
-                        _ => {
-                            anyhow::bail!(compile_help.replace("#EP", "TensorRT"))
-                        }
-                    }
-                }
-            }
-            Device::Cuda(id) => {
-                #[cfg(not(feature = "cuda"))]
-                {
-                    anyhow::bail!(feature_help
-                        .replace("#EP", "CUDA")
-                        .replace("#FEATURE", "cuda"));
-                }
-
-                #[cfg(feature = "cuda")]
-                {
-                    let ep = ort::execution_providers::CUDAExecutionProvider::default()
-                        .with_device_id(id as i32);
-                    match ep.is_available() {
-                        Ok(true) => {
-                            ep.register(&mut builder).map_err(|err| {
-                                anyhow::anyhow!("Failed to register CUDA: {}", err)
-                            })?;
-                        }
-                        _ => anyhow::bail!(compile_help.replace("#EP", "CUDA")),
+                        _ => anyhow::bail!(compile_help.replace("#EP", "TensorRT")),
                     }
                 }
             }
             Device::CoreML(id) => {
                 #[cfg(not(feature = "mps"))]
-                {
-                    anyhow::bail!(feature_help
-                        .replace("#EP", "CoreML")
-                        .replace("#FEATURE", "mps"));
-                }
+                anyhow::bail!(feature_help
+                    .replace("#EP", "CoreML")
+                    .replace("#FEATURE", "mps"));
                 #[cfg(feature = "mps")]
                 {
                     let ep = ort::execution_providers::CoreMLExecutionProvider::default();
                     match ep.is_available() {
-                        Ok(true) => {
-                            ep.register(&mut builder).map_err(|err| {
-                                anyhow::anyhow!("Failed to register CoreML: {}", err)
-                            })?;
-                        }
+                        Ok(true) => ep.register(&mut builder)?,
                         _ => anyhow::bail!(compile_help.replace("#EP", "CoreML")),
                     }
                 }
@@ -420,36 +398,27 @@ impl Engine {
             _ => {
                 let ep = ort::execution_providers::CPUExecutionProvider::default();
                 match ep.is_available() {
-                    Ok(true) => {
-                        ep.register(&mut builder)
-                            .map_err(|err| anyhow::anyhow!("Failed to register Cpu: {}", err))?;
-                    }
+                    Ok(true) => ep.register(&mut builder)?,
                     _ => anyhow::bail!(compile_help.replace("#EP", "Cpu")),
                 }
             }
         }
-
-        // session
         let session = builder
             .with_optimization_level(GraphOptimizationLevel::Level3)?
             .with_intra_threads(std::thread::available_parallelism()?.get())?
             .commit_from_file(self.file())?;
-
         Ok(session)
     }
 
     fn build_ort_inputs(xs: &OrtTensorAttr, iiixs: &[Iiix]) -> Result<Vec<Vec<MinOptMax>>> {
-        // init
         let mut ys: Vec<Vec<MinOptMax>> = xs
             .dimss
             .iter()
             .map(|dims| dims.iter().map(|&x| MinOptMax::from(x)).collect())
             .collect();
 
-        // update from customized
         for iiix in iiixs.iter() {
             if let Some(x) = xs.dimss.get(iiix.i).and_then(|dims| dims.get(iiix.ii)) {
-                // dynamic
                 if *x == 0 {
                     ys[iiix.i][iiix.ii] = iiix.x.clone();
                 }
@@ -462,24 +431,45 @@ impl Engine {
             }
         }
 
-        // set batch size <- i00
+        // Fallback to 384 if not set via iiixs
+        for (i, dims) in ys.iter_mut().enumerate() {
+            if dims.len() == 4 {
+                if dims[1].is_dyn() {
+                    dims[1] = MinOptMax::from(3);
+                } // Channels
+                if dims[2].is_dyn() {
+                    dims[2] = MinOptMax::from(384);
+                } // Height
+                if dims[3].is_dyn() {
+                    dims[3] = MinOptMax::from(384);
+                } // Width
+                debug!("Set input {} dimensions: {:?}", i, dims);
+            }
+        }
+
         let batch_size: MinOptMax = if ys[0][0].is_dyn() {
             1.into()
         } else {
             ys[0][0].clone()
         };
 
-        // deal with the dynamic axis
         ys.iter_mut().enumerate().for_each(|(i, xs)| {
+            let xs_len = xs.len();
             xs.iter_mut().enumerate().for_each(|(ii, x)| {
                 if x.is_dyn() {
                     let z = if ii == 0 {
                         batch_size.clone()
+                    } else if ii == 1 && xs_len == 4 {
+                        MinOptMax::from(3)
+                    } else if ii == 2 && xs_len == 4 {
+                        MinOptMax::from(384)
+                    } else if ii == 3 && xs_len == 4 {
+                        MinOptMax::from(384)
                     } else {
-                        let z =  MinOptMax::from(1);
+                        let z = MinOptMax::from(1);
                         warn!(
                             "Using dynamic shapes in inputs without specifying it: the {}-th input, the {}-th dimension. \
-                            Using {:?} by default. You should make it clear when using TensorRT.",
+                            Using {:?} by default.",
                             i + 1, ii + 1, z
                         );
                         z

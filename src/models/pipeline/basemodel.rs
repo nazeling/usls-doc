@@ -22,6 +22,8 @@ pub struct BaseModelVisual {
     scale: Option<Scale>,
     kind: Option<Kind>,
     version: Option<Version>,
+    #[args(setter = false, default)]
+    force_rgb_flag: bool, // Flag to indicate whether to force images to RGB.
 }
 
 impl BaseModelVisual {
@@ -41,8 +43,8 @@ impl BaseModelVisual {
         );
         let processor = options
             .to_processor()?
-            .with_image_width(width as _)
-            .with_image_height(height as _);
+            .with_image_width(options.image_width)
+            .with_image_height(options.image_height);
 
         let device = options.model_device;
         let task = options.model_task;
@@ -67,14 +69,34 @@ impl BaseModelVisual {
             device,
             version,
             name,
+            force_rgb_flag: false,
         })
+    }
+
+    pub fn force_rgb(&mut self, enable: bool) {
+        self.force_rgb_flag = enable; // No-op, Processor handles RGB automatically
+    }
+
+    pub fn processor_mut(&mut self) -> &mut Processor {
+        &mut self.processor
+    }
+
+    pub fn encode_with_processed(&mut self, x: &X) -> Result<X> {
+        let mut input = x.clone();
+        if self.processor.nchw() && input.0.shape()[1] != 3 {
+            input = input.nhwc2nchw()?;
+        }
+        println!("CUDA input shape: {:?}", input.0.shape()); // Updated label
+        let xs = Xs::from(vec![input]);
+        let outputs = self.engine.run(xs)?;
+        Ok(outputs[0].clone())
     }
 
     pub fn preprocess(&mut self, xs: &[DynamicImage]) -> Result<Xs> {
         let x = self.processor.process_images(xs)?;
-        self.batch = xs.len(); // update
-
-        Ok(x.into())
+        self.batch = xs.len();
+        println!("Preprocessed shape: {:?}", x.x.0.shape()); // changed from x.images[0]
+        Ok(Xs::from(vec![x.x])) // changed from xs::Xs::from(x.images)
     }
 
     pub fn inference(&mut self, xs: Xs) -> Result<Xs> {
@@ -84,7 +106,6 @@ impl BaseModelVisual {
     pub fn encode(&mut self, xs: &[DynamicImage]) -> Result<X> {
         let xs = elapsed!("visual-preprocess", self.ts, { self.preprocess(xs)? });
         let xs = elapsed!("visual-inference", self.ts, { self.inference(xs)? });
-
         Ok(xs[0].to_owned())
     }
 }

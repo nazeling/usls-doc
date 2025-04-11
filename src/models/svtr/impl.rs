@@ -15,16 +15,16 @@ pub struct SVTR {
     confs: DynConf,
     spec: String,
     ts: Ts,
-    processor: Processor,
+    pub processor: Processor,
 }
 
 impl SVTR {
     pub fn new(options: Options) -> Result<Self> {
         let engine = options.to_engine()?;
         let (batch, height, width, ts) = (
-            engine.batch().opt(),
-            engine.try_height().unwrap_or(&960.into()).opt(),
-            engine.try_width().unwrap_or(&960.into()).opt(),
+            options.model_iiixs.get(0).map_or(1, |i| i.x.opt()),
+            options.model_iiixs.get(2).map_or(48, |i| i.x.opt()),
+            options.model_iiixs.get(3).map_or(960, |i| i.x.opt()),
             engine.ts.clone(),
         );
         let spec = options.model_spec().to_string();
@@ -36,7 +36,7 @@ impl SVTR {
         if processor.vocab().is_empty() {
             anyhow::bail!("No vocab file found")
         }
-        log::info!("Vacab size: {}", processor.vocab().len());
+        log::info!("Vocab size: {}", processor.vocab().len());
 
         Ok(Self {
             engine,
@@ -51,7 +51,8 @@ impl SVTR {
     }
 
     fn preprocess(&mut self, xs: &[DynamicImage]) -> Result<Xs> {
-        Ok(self.processor.process_images(xs)?.into())
+        // ProcessedImages struct has .x not .images
+        Ok(self.processor.process_images(xs)?.to_xs(None))
     }
 
     fn inference(&mut self, xs: Xs) -> Result<Xs> {
@@ -62,7 +63,6 @@ impl SVTR {
         let ys = elapsed!("preprocess", self.ts, { self.preprocess(xs)? });
         let ys = elapsed!("inference", self.ts, { self.inference(ys)? });
         let ys = elapsed!("postprocess", self.ts, { self.postprocess(ys)? });
-
         Ok(ys)
     }
 
@@ -71,6 +71,11 @@ impl SVTR {
     }
 
     pub fn postprocess(&self, xs: Xs) -> Result<Ys> {
+        // Use values directly from the ProcessedImages' config or processor fields
+        let config = self.processor.generation_config();
+        let max_length = config.max_length;
+        let conf_threshold = config.conf_threshold;
+
         let ys: Vec<Y> = xs[0]
             .axis_iter(Axis(0))
             .into_par_iter()
@@ -79,19 +84,15 @@ impl SVTR {
                     .axis_iter(Axis(0))
                     .filter_map(|x| x.into_iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)))
                     .collect();
-
-                preds.dedup_by(|a, b| a.0 == b.0);
-
+                preds.truncate(max_length);
                 let text: String = preds
                     .into_iter()
-                    .filter(|(id, &conf)| *id != 0 && conf >= self.confs[0])
+                    .filter(|(id, &conf)| *id != 0 && conf >= conf_threshold)
                     .map(|(id, _)| self.processor.vocab()[id].clone())
                     .collect();
-
                 Y::default().with_texts(&[text.into()])
             })
             .collect();
-
-        Ok(ys.into())
+        Ok(Ys(ys)) // Wrap with Ys
     }
 }

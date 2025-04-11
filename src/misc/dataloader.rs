@@ -1,15 +1,16 @@
+use crate::{build_progress_bar, Location, MediaType};
+use anyhow::{anyhow, Result};
 use image::DynamicImage;
+use image::RgbImage; // Add this import
 use indicatif::ProgressBar;
 use log::{info, warn};
+use ndarray::Array;
+use ort::value::Value;
+use pdfium_render::prelude::*;
+use rayon::prelude::*;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use rayon::prelude::*; // For parallel processing
-use pdfium_render::prelude::*; // Assuming this crate for PDFium bindings
-use crate::{build_progress_bar, Location, MediaType};
-use ort::value::Value;
-use ndarray::Array;
-use anyhow::{anyhow, Result};
 
 type TempReturnType = (Vec<DynamicImage>, Vec<PathBuf>);
 
@@ -25,25 +26,25 @@ impl Iterator for DataLoaderIterator {
     fn next(&mut self) -> Option<Self::Item> {
         match &self.progress_bar {
             None => self.receiver.recv().ok(),
-            Some(progress_bar) => {
-                match self.receiver.recv().ok() {
-                    Some(item) => {
-                        progress_bar.inc(self.batch_size);
-                        Some(item)
-                    }
-                    None => {
-                        progress_bar.set_prefix("Iterated");
-                        progress_bar.set_style(
-                            match indicatif::ProgressStyle::with_template(crate::PROGRESS_BAR_STYLE_FINISH_2) {
-                                Ok(x) => x,
-                                Err(err) => panic!("Failed to set style for progressbar: {}", err),
-                            },
-                        );
-                        progress_bar.finish();
-                        None
-                    }
+            Some(progress_bar) => match self.receiver.recv().ok() {
+                Some(item) => {
+                    progress_bar.inc(self.batch_size);
+                    Some(item)
                 }
-            }
+                None => {
+                    progress_bar.set_prefix("Iterated");
+                    progress_bar.set_style(
+                        match indicatif::ProgressStyle::with_template(
+                            crate::PROGRESS_BAR_STYLE_FINISH_2,
+                        ) {
+                            Ok(x) => x,
+                            Err(err) => panic!("Failed to set style for progressbar: {}", err),
+                        },
+                    );
+                    progress_bar.finish();
+                    None
+                }
+            },
         }
     }
 }
@@ -59,7 +60,8 @@ impl IntoIterator for DataLoader {
                 "Iterating",
                 Some("Images"),
                 crate::PROGRESS_BAR_STYLE_CYAN_2,
-            ).ok()
+            )
+            .ok()
         } else {
             None
         };
@@ -72,16 +74,14 @@ impl IntoIterator for DataLoader {
     }
 }
 
-/// Loads and manages image data for document processing, optimized for batches from folders or PDFs.
-/// Supports single images (CPU-only), folders of images, remote URLs, and PDFs via pdfium.
 pub struct DataLoader {
-    paths: Option<VecDeque<PathBuf>>,    // Queue of image paths
-    media_type: MediaType,               // Image or PDF
-    batch_size: usize,                   // Batch size for iteration
-    bound: usize,                        // Channel buffer size
+    paths: Option<VecDeque<PathBuf>>,
+    media_type: MediaType,
+    batch_size: usize,
+    bound: usize,
     receiver: mpsc::Receiver<TempReturnType>,
-    nf: u64,                             // Number of images
-    with_pb: bool,                       // Progress bar flag
+    nf: u64,
+    with_pb: bool,
 }
 
 impl TryFrom<&str> for DataLoader {
@@ -95,47 +95,44 @@ impl TryFrom<&str> for DataLoader {
 impl DataLoader {
     pub fn new(source: &str) -> Result<Self> {
         let source_path = Path::new(source);
-        let (paths, media_type, nf) = if source.starts_with("http://") || source.starts_with("https://") {
-            // Remote image URL (single image)
-            (
-                Some(VecDeque::from([source_path.to_path_buf()])),
-                MediaType::Image(Location::Remote),
-                1
-            )
-        } else if source_path.exists() {
-            if source_path.is_file() {
-                if source_path.extension().and_then(|s| s.to_str()) == Some("pdf") {
-                    // PDF file
-                    let images = Self::pdf_to_images(source_path)?;
-                    let nf = images.len() as u64;
+        let (paths, media_type, nf) =
+            if source.starts_with("http://") || source.starts_with("https://") {
+                (
+                    Some(VecDeque::from([source_path.to_path_buf()])),
+                    MediaType::Image(Location::Remote),
+                    1,
+                )
+            } else if source_path.exists() {
+                if source_path.is_file() {
+                    if source_path.extension().and_then(|s| s.to_str()) == Some("pdf") {
+                        let images = Self::pdf_to_images(source_path)?;
+                        let nf = images.len() as u64;
+                        (
+                            Some(VecDeque::from(images)),
+                            MediaType::Image(Location::Local),
+                            nf,
+                        )
+                    } else {
+                        (
+                            Some(VecDeque::from([source_path.to_path_buf()])),
+                            MediaType::Image(Location::Local),
+                            1,
+                        )
+                    }
+                } else if source_path.is_dir() {
+                    let paths_sorted = Self::load_from_folder(source_path)?;
+                    let nf = paths_sorted.len() as u64;
                     (
-                        Some(VecDeque::from(images)),
+                        Some(VecDeque::from(paths_sorted)),
                         MediaType::Image(Location::Local),
-                        nf
+                        nf,
                     )
                 } else {
-                    // Single image file
-                    (
-                        Some(VecDeque::from([source_path.to_path_buf()])),
-                        MediaType::Image(Location::Local),
-                        1
-                    )
+                    anyhow::bail!("Invalid source: {:?}", source_path);
                 }
-            } else if source_path.is_dir() {
-                // Directory of images (batch case)
-                let paths_sorted = Self::load_from_folder(source_path)?;
-                let nf = paths_sorted.len() as u64;
-                (
-                    Some(VecDeque::from(paths_sorted)),
-                    MediaType::Image(Location::Local),
-                    nf
-                )
             } else {
-                anyhow::bail!("Invalid source: {:?}", source_path);
-            }
-        } else {
-            anyhow::bail!("Source not found: {:?}", source_path);
-        };
+                anyhow::bail!("Source not found: {:?}", source_path);
+            };
 
         info!("Found {:?} with {} images", media_type, nf);
 
@@ -144,7 +141,7 @@ impl DataLoader {
             media_type,
             bound: 50,
             receiver: mpsc::sync_channel(1).1,
-            batch_size: if nf == 1 { 1 } else { 8 }, // Default batch size 8 for multi-image
+            batch_size: if nf == 1 { 1 } else { 8 },
             nf,
             with_pb: true,
         })
@@ -201,7 +198,9 @@ impl DataLoader {
                     }
                 }
                 if yis.len() == batch_size
-                    && sender.send((std::mem::take(&mut yis), std::mem::take(&mut yps))).is_err()
+                    && sender
+                        .send((std::mem::take(&mut yis), std::mem::take(&mut yps)))
+                        .is_err()
                 {
                     break;
                 }
@@ -250,9 +249,7 @@ impl DataLoader {
 
         for (i, page) in doc.pages().iter().enumerate() {
             let output_path = temp_dir.join(format!("page_{}.png", i));
-            let bitmap = page.render_with_config(
-                &PdfRenderConfig::new().set_target_width(2480),
-            )?;
+            let bitmap = page.render_with_config(&PdfRenderConfig::new().set_target_width(2480))?;
             let image = bitmap.as_image();
             image.save(&output_path)?;
             image_paths.push(output_path);
@@ -272,7 +269,8 @@ impl DataLoader {
     pub fn try_read_batch<P: AsRef<Path> + std::fmt::Debug + Sync>(
         paths: &[P],
     ) -> Result<Vec<DynamicImage>> {
-        let images: Vec<DynamicImage> = paths.par_iter()
+        let images: Vec<DynamicImage> = paths
+            .par_iter()
             .filter_map(|path| Self::try_read(path).ok())
             .collect();
         if images.is_empty() {
@@ -280,27 +278,59 @@ impl DataLoader {
         }
         Ok(images)
     }
-	pub fn try_from_rgb8(images: &[image::RgbImage]) -> Result<Vec<Value>> {
-    let mut tensors = Vec::with_capacity(images.len());
-    for img in images {
-        let (width, height) = img.dimensions();
-        let shape = [1, 3, height as usize, width as usize];
-        let data: Vec<f32> = img
-            .pixels()
-            .flat_map(|p| p.0.iter().map(|v| *v as f32 / 255.0))
-            .collect();
 
-        // Create the ndarray from owned data (pass tensor_array by value, not by reference)
-        let tensor_array = Array::from_shape_vec(shape, data)
-            .map_err(|e| anyhow!("Failed to create tensor: {}", e))?;
+    pub fn try_from_rgb8(images: &[RgbImage]) -> Result<Vec<Value>> {
+        let mut tensors = Vec::with_capacity(images.len());
+        for img in images {
+            let (width, height) = img.dimensions();
+            let shape = [1, 3, height as usize, width as usize];
+            let data: Vec<f32> = img
+                .pixels()
+                .flat_map(|p| p.0.iter().map(|v| *v as f32 / 255.0))
+                .collect();
 
-        // Create a tensor. Value::from_array returns a Value specialized on TensorValueType<f32>
-        let tensor_specialized = Value::from_array(tensor_array)
-            .map_err(|e| anyhow!("Failed to create ONNX tensor: {}", e))?;
-        
-        // Convert the specialized tensor into a dynamic type if required
-        tensors.push(tensor_specialized.into());
+            let tensor_array = Array::from_shape_vec(shape, data)
+                .map_err(|e| anyhow!("Failed to create tensor: {}", e))?;
+
+            let tensor_specialized = Value::from_array(tensor_array)
+                .map_err(|e| anyhow!("Failed to create ONNX tensor: {}", e))?;
+
+            tensors.push(tensor_specialized.into());
+        }
+        Ok(tensors)
     }
-    Ok(tensors)
-}
+
+    pub fn try_from_rgb8_normalized(images: &[RgbImage], normalize: bool) -> Result<Vec<Value>> {
+        let mut tensors = Vec::with_capacity(images.len());
+        for img in images {
+            let (width, height) = img.dimensions();
+            let shape = [1, 3, height as usize, width as usize];
+            let mut data: Vec<f32> = img
+                .pixels()
+                .flat_map(|p| p.0.iter().map(|v| *v as f32 / 255.0))
+                .collect();
+
+            // Apply normalization if requested (PaddleOCR's ImageNet-style normalization)
+            if normalize {
+                for i in 0..data.len() {
+                    let channel = i % 3;
+                    data[i] = match channel {
+                        0 => (data[i] - 0.485) / 0.229, // R
+                        1 => (data[i] - 0.456) / 0.224, // G
+                        2 => (data[i] - 0.406) / 0.225, // B
+                        _ => unreachable!(),
+                    };
+                }
+            }
+
+            let tensor_array = Array::from_shape_vec(shape, data)
+                .map_err(|e| anyhow!("Failed to create tensor: {}", e))?;
+
+            let tensor_specialized = Value::from_array(tensor_array)
+                .map_err(|e| anyhow!("Failed to create ONNX tensor: {}", e))?;
+
+            tensors.push(tensor_specialized.into());
+        }
+        Ok(tensors)
+    }
 }

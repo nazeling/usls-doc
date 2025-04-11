@@ -5,6 +5,8 @@ use log::{error, info};
 use ndarray::{s, Array, Axis};
 use rayon::prelude::*;
 
+pub use ort::value::Tensor;
+
 use crate::{
     elapsed,
     yolo::{BoxType, YOLOPredsFormat},
@@ -143,7 +145,10 @@ impl YOLO {
                         Version(9, 0) | Version(12, 0) => YOLOPredsFormat::n_cxcywh_clss_a(),
                         Version(10, 0) => YOLOPredsFormat::n_a_xyxy_confcls().apply_nms(false),
                         _ => {
-                            anyhow::bail!("No clear YOLO Task specified for Version: {:?}.", version)
+                            anyhow::bail!(
+                                "No clear YOLO Task specified for Version: {:?}.",
+                                version
+                            )
                         }
                     };
                     (layout, Task::ObjectDetection)
@@ -252,7 +257,7 @@ impl YOLO {
 
     fn preprocess(&mut self, xs: &[DynamicImage]) -> Result<Xs> {
         let x = self.processor.process_images(xs)?;
-        Ok(x.into())
+        Ok(x.to_xs(None))
     }
 
     fn inference(&mut self, xs: Xs) -> Result<Xs> {
@@ -265,15 +270,13 @@ impl YOLO {
         let ys = elapsed!("postprocess", self.ts, { self.postprocess(ys)? });
         Ok(ys)
     }
-	fn fetch_names_from_onnx(_engine: &Engine) -> Option<Vec<String>> {
-        
+    fn fetch_names_from_onnx(_engine: &Engine) -> Option<Vec<String>> {
         None
     }
-	fn n2s(n: usize) -> Vec<String> {
+    fn n2s(n: usize) -> Vec<String> {
         (0..n).map(|i| i.to_string()).collect()
     }
-	fn fetch_nk_from_onnx(_engine: &Engine) -> Option<usize> {
-        
+    fn fetch_nk_from_onnx(_engine: &Engine) -> Option<usize> {
         None
     }
     pub fn summary(&mut self) {
@@ -314,8 +317,8 @@ impl YOLO {
                     return Some(y.with_probs(probs));
                 }
 
-                let (image_height, image_width) = self.processor.image0s_size[idx];
-                let ratio = self.processor.scale_factors_hw[idx][0];
+                let (image_height, image_width) = self.processor.image_sizes()[idx];
+                let ratio = self.processor.scale_factors()[idx][0];
 
                 let (y_bboxes, y_mbrs) = slice_bboxes?
                     .axis_iter(Axis(0))
@@ -339,8 +342,10 @@ impl YOLO {
                             }
                         };
 
-                        if (!self.classes_excluded.is_empty() && self.classes_excluded.contains(&class_id))
-                            || (!self.classes_retained.is_empty() && !self.classes_retained.contains(&class_id))
+                        if (!self.classes_excluded.is_empty()
+                            && self.classes_excluded.contains(&class_id))
+                            || (!self.classes_retained.is_empty()
+                                && !self.classes_retained.contains(&class_id))
                             || (confidence < self.confs[class_id])
                         {
                             return None;
@@ -504,10 +509,15 @@ impl YOLO {
                                         image_height as _,
                                         mask,
                                     )?;
-                                let (xmin, ymin, xmax, ymax) = (bbox.xmin(), bbox.ymin(), bbox.xmax(), bbox.ymax());
+                                let (xmin, ymin, xmax, ymax) =
+                                    (bbox.xmin(), bbox.ymin(), bbox.xmax(), bbox.ymax());
                                 for (y, row) in mask.enumerate_rows_mut() {
                                     for (x, _, pixel) in row {
-                                        if x < xmin as _ || x > xmax as _ || y < ymin as _ || y > ymax as _ {
+                                        if x < xmin as _
+                                            || x > xmax as _
+                                            || y < ymin as _
+                                            || y > ymax as _
+                                        {
                                             *pixel = image::Luma([0u8]);
                                         }
                                     }
@@ -531,7 +541,8 @@ impl YOLO {
                                 } else {
                                     Polygon::default()
                                 };
-                                let mut mask_obj = Mask::default().with_mask(mask).with_id(bbox.id());
+                                let mut mask_obj =
+                                    Mask::default().with_mask(mask).with_id(bbox.id());
                                 if let Some(name) = bbox.name() {
                                     mask_obj = mask_obj.with_name(name);
                                 }

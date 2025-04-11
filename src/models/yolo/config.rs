@@ -14,7 +14,7 @@ impl Options {
     }
 
     pub fn doclayout_yolo_docstructbench() -> Self {
-        Self::yolo()  
+        Self::yolo()
             .with_model_file("doclayout-docstructbench.onnx")
             .with_model_ixx(0, 2, (640, 1024, 1024).into())
             .with_model_ixx(0, 3, (640, 1024, 1024).into())
@@ -34,17 +34,11 @@ impl Options {
     }
 
     pub fn doclayout_yolo_docsynth() -> Self {
-        Self::yolo()  
+        Self::yolo()
             .with_model_file("doclayout_yolo_docsynth300k_imgsz1600.onnx")
             .with_model_ixx(0, 2, 1600.into())
             .with_model_ixx(0, 3, 1600.into())
             .with_class_confs(&[0.4])
-            .with_class_names(&[
-                "text",
-                "title",
-                "list",
-                "table",
-                "figure",
-            ])
+            .with_class_names(&["text", "title", "list", "table", "figure"])
     }
 }

@@ -1,12 +1,15 @@
-use aksr::Builder;
-use anyhow::Result;
-use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer, TruncationParams};
-use std::path::Path;
-#[cfg(feature = "yolo")]
+use crate::misc::processor;
+use crate::misc::processor::TokenizerTrait;
 use crate::models::yolo::YOLOPredsFormat;
-use crate::{ DType, Device, Engine, Hub, Iiix, Kind, LogitsSampler, MinOptMax, Processor, ResizeMode, Scale,
+use crate::tokenizer::DummyTokenizer;
+use crate::{
+    DType, Device, Engine, Hub, Iiix, Kind, LogitsSampler, MinOptMax, Processor, ResizeMode, Scale,
     Task, Version,
 };
+use aksr::Builder;
+use anyhow::Result;
+use std::path::Path;
+use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer, TruncationParams};
 
 #[derive(Builder, Debug, Clone)]
 pub struct Options {
@@ -24,7 +27,7 @@ pub struct Options {
     pub model_num_dry_run: usize,
     pub trt_fp16: bool,
     pub profile: bool,
-    
+
     // Processor configs
     #[args(setter = false)]
     pub image_width: u32,
@@ -74,8 +77,7 @@ pub struct Options {
     pub iou_3: Option<f32>,
     pub apply_nms: Option<bool>,
     pub find_contours: bool,
-    #[cfg(feature = "yolo")]
-	pub yolo_preds_format: Option<YOLOPredsFormat>,
+    pub yolo_preds_format: Option<YOLOPredsFormat>,
     pub classes_excluded: Vec<usize>,
     pub classes_retained: Vec<usize>,
     pub min_width: Option<f32>,
@@ -157,7 +159,6 @@ impl Default for Options {
             iou_3: None,
             apply_nms: None,
             find_contours: false,
-            #[cfg(feature = "yolo")]
             yolo_preds_format: None,
             classes_excluded: vec![],
             classes_retained: vec![],
@@ -214,18 +215,50 @@ impl Options {
     }
 
     pub fn to_processor(&self) -> Result<Processor> {
-    let logits_sampler = LogitsSampler::new()
-        .with_temperature(self.temperature)
-        .with_topp(self.topp);
+        let logits_sampler = LogitsSampler::new()
+            .with_temperature(self.temperature)
+            .with_topp(self.topp);
 
-    let tokenizer = match self.model_kind {
-        Some(Kind::Language) | Some(Kind::VisionLanguage) => self.try_build_tokenizer()?,
-        _ => return Err(anyhow::anyhow!("Tokenizer required for language models")),
-    };
+        // Load vocabulary for tokenizer: try to load from vocab_txt.
+        let local_vocab: Vec<String> = if let Some(vocab_txt_path) = &self.vocab_txt {
+            std::fs::read_to_string(vocab_txt_path)?
+                .lines()
+                .map(|line| line.to_string())
+                .collect()
+        } else {
+            vec![]
+        };
 
-    let vocab: Vec<String> = match &self.vocab_txt {
-        Some(x) => {
-            let file = if !std::path::PathBuf::from(&x).exists() {
+        // --- Select tokenizer for model type
+        let tokenizer: Box<dyn TokenizerTrait> = match self.model_kind {
+            // For language/vision-language, use DummyTokenizer if vocab available, else try real one
+            Some(Kind::Language) | Some(Kind::VisionLanguage) => {
+                if !local_vocab.is_empty() {
+                    // Use DummyTokenizer implementation
+                    Box::new(DummyTokenizer::new(local_vocab.clone())?)
+                } else {
+                    // Try loading HuggingFace tokenizer (could fail if no tokenizer.json etc)
+                    self.try_build_tokenizer()?
+                }
+            }
+            // For pure vision models (e.g. SVTR), always use DummyTokenizer (allow empty vocab, or supply a dummy token)
+            _ => {
+                // For SVTR/vision-only: you could decide to not error, just provide dummy
+                let dummy_vocab = if local_vocab.is_empty() {
+                    vec!["[DUMMY]".to_string()]
+                } else {
+                    local_vocab.clone()
+                };
+                Box::new(DummyTokenizer::new(dummy_vocab)?)
+            }
+        };
+
+        // Now load the vocab again (from vocab_txt) for passing to the Processor.
+        // If you want to ensure that both DummyTokenizer and Processor get the same vocab, can unify above.
+        let vocab: Vec<String> = if !local_vocab.is_empty() {
+            local_vocab.clone()
+        } else if let Some(x) = &self.vocab_txt {
+            let file = if !std::path::PathBuf::from(x).exists() {
                 Hub::default().try_fetch(&format!("{}/{}", self.model_name, x))?
             } else {
                 x.to_string()
@@ -234,31 +267,27 @@ impl Options {
                 .lines()
                 .map(|line| line.to_string())
                 .collect()
-        }
-        None => vec![],
-    };
+        } else {
+            vec![]
+        };
+        let vocab_refs: Vec<&str> = vocab.iter().map(|s| s.as_str()).collect();
 
-    // Convert Vec<String> to Vec<&str>
-    let vocab_refs: Vec<&str> = vocab.iter().map(|s| s.as_str()).collect();
-
-    Ok(Processor::default()
-        .with_image_width(self.image_width)
-        .with_image_height(self.image_height)
-        .with_image0s_size(&[]) // Empty slice
-        .with_scale_factors_hw(&[]) // Empty slice
-        .with_resize_mode(self.resize_mode.clone())
-        .with_resize_filter(self.resize_filter)
-        .with_padding_value(self.padding_value)
-        .with_do_normalize(self.normalize)
-        .with_image_mean(&self.image_mean) // Borrow the Vec
-        .with_image_std(&self.image_std) // Borrow the Vec
-        .with_nchw(self.nchw)
-        .with_tokenizer(tokenizer) // Unwrapped tokenizer
-        .with_vocab(&vocab_refs) // Convert to slice of &str
-        .with_unsigned(self.unsigned)
-        .with_logits_sampler(logits_sampler) // Unwrapped sampler
-        .with_options(self.clone()))
-}
+        Ok(Processor::new(self.clone())?
+            .with_image_width(self.image_width)
+            .with_image_height(self.image_height)
+            .with_resize_mode(self.resize_mode.clone())
+            .with_resize_filter(self.resize_filter)
+            .with_padding_value(self.padding_value)
+            .with_do_normalize(self.normalize)
+            .with_image_mean(&self.image_mean)
+            .with_image_std(&self.image_std)
+            .with_nchw(self.nchw)
+            .with_tokenizer(tokenizer)
+            .with_vocab(&vocab_refs)
+            .with_unsigned(self.unsigned)
+            .with_logits_sampler(logits_sampler)
+            .with_options(self.clone()))
+    }
 
     pub fn commit(mut self) -> Result<Self> {
         if std::path::PathBuf::from(&self.model_file).exists() {
@@ -358,7 +387,34 @@ impl Options {
         self
     }
 
-    pub fn try_build_tokenizer(&self) -> Result<Tokenizer> {
+    pub fn from_path(model_file: &str, tokenizer_file: &str) -> Result<Self> {
+        let mut opt = Self::new().with_model_path(model_file)?;
+        opt.tokenizer_file = Some(tokenizer_file.to_string());
+        opt.model_kind = Some(crate::Kind::Language);
+        Ok(opt)
+    }
+
+    pub fn from_trocr_paths(
+        encoder_path: &str,
+        decoder_path: &str,
+        decoder_merged_path: &str,
+        tokenizer_file: &str,
+    ) -> Result<(Self, Self, Self)> {
+        let encoder = Options::from_path(encoder_path, tokenizer_file)?
+            .with_image_height(384)
+            .with_image_width(384)
+            .with_model_kind(crate::Kind::VisionLanguage);
+
+        let decoder = Options::from_path(decoder_path, tokenizer_file)?
+            .with_model_kind(crate::Kind::Language);
+
+        let decoder_merged = Options::from_path(decoder_merged_path, tokenizer_file)?
+            .with_model_kind(crate::Kind::Language);
+
+        Ok((encoder, decoder, decoder_merged))
+    }
+
+    pub fn try_build_tokenizer(&self) -> Result<Box<dyn TokenizerTrait>> {
         let mut hub = Hub::default();
         let pad_id = match hub.try_fetch(
             self.tokenizer_config_file
@@ -434,14 +490,19 @@ impl Options {
                 modified.clone()
             }
         };
-        Ok(tokenizer.into())
+
+        Ok(Box::new(processor::MyTokenizer(tokenizers::Tokenizer::from(
+            tokenizer,
+        ))) as Box<dyn TokenizerTrait>)
     }
 
     pub fn nc(&self) -> Option<usize> {
-        self.num_classes.or_else(|| self.class_names.as_ref().map(|v| v.len()))
+        self.num_classes
+            .or_else(|| self.class_names.as_ref().map(|v| v.len()))
     }
 
     pub fn nk(&self) -> Option<usize> {
-        self.num_keypoints.or_else(|| self.keypoint_names.as_ref().map(|v| v.len()))
+        self.num_keypoints
+            .or_else(|| self.keypoint_names.as_ref().map(|v| v.len()))
     }
 }
