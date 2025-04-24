@@ -1,3 +1,5 @@
+Last update - layout detection now works right out of the box with the docstructbench1024 onnx model, but I can't get OCR to work with SVTR/DB, or TROCR, with this repo, so I stopped updating it. 
+
 This repo is being used for document layout processing, because of its excellent Rust support for ONNX, to include Paddle and Yolo models. Do not use this repo if you want all the features of the main branch, because this does not have them, and will keep diverging from the main as more changes are made. If you are doing layout processing and/or OCR you might find the finished product useful.
 
 <h2 align="center">usls</h2>
