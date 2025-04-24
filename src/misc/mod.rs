@@ -14,6 +14,7 @@ mod labels;
 mod logits_sampler;
 mod media;
 mod min_opt_max;
+mod model_choice;
 pub(crate) mod onnx;
 mod ops;
 mod options;
@@ -24,6 +25,8 @@ mod task;
 mod ts;
 mod utils;
 mod version;
+#[cfg(feature = "ffmpeg")]
+mod viewer;
 
 pub use annotator::Annotator;
 pub use color::Color;
@@ -41,6 +44,7 @@ pub use labels::*;
 pub use logits_sampler::LogitsSampler;
 pub use media::*;
 pub use min_opt_max::MinOptMax;
+pub use model_choice::ModelChoice;
 pub use ops::*;
 pub use options::*;
 pub use processor::*;
@@ -49,3 +53,9 @@ pub use task::Task;
 pub use ts::Ts;
 pub use utils::*;
 pub use version::Version;
+#[cfg(feature = "ffmpeg")]
+pub use viewer::Viewer;
+
+// re-export
+#[cfg(feature = "ffmpeg")]
+pub use minifb::Key;
