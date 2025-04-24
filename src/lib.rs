@@ -40,21 +40,12 @@
 //!
 //! All examples are located in the [examples](https://github.com/jamjamjon/usls/tree/main/examples) directory.
 
-//! **usls-doc** is a Rust library integrated with **ONNXRuntime**,
-//! focusing on building a document layout detection and OCR pipeline.
-//! It aims to provide high-level abstractions for model usage.
-
+pub mod docstructbench;
 mod misc;
+pub mod models;
 mod xy;
 
-pub mod model;
-pub mod models;
-pub mod session;
-pub mod tokenizer;
-
+pub use docstructbench::*;
 pub use misc::*;
-pub use model::*;
 pub use models::*;
-pub use session::*;
-pub use tokenizer::*;
 pub use xy::*;
